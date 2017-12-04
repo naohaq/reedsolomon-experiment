@@ -11,7 +11,7 @@ import MyUtil
 
 type F929 = $(primeField 929)
 
-type Decoder = $(rsDecoder 40 18) F929
+type Decoder = $(rsDecoder 40 22) F929
 
 alpha :: F929
 alpha = 3
@@ -41,9 +41,7 @@ rws = [897, 465, 237, 640, 111,  34, 672, 598,
 main :: IO ()
 main = do
   let dec = dec_pdf417
-  let code_N  = block_N dec
-  let code_2t = block_K dec
-  putStrLn $ "RS Code: (" ++ show code_N ++ "," ++ show (code_N - code_2t) ++ ")"
+  putStrLn $ "RS Code: (" ++ show (block_N dec) ++ "," ++ show (block_K dec) ++ ")"
   putStrLn $ "Received message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws)
   let csum = calcChecksum dec rws
@@ -53,7 +51,7 @@ main = do
   let sigma_r = errLocator dec synd
   putStrLn $ "Error locator: " ++ showF929 sigma_r
   let locs = solveErrLocations dec sigma_r
-  let locs_r = [code_N - 1 - k | k <- reverse locs]
+  let locs_r = [block_N dec - 1 - k | k <- reverse locs]
   putStrLn $ "Error locations: " ++ show locs_r
   let mtx = errMatrix dec locs synd
   putStrLn "Error matrix:"

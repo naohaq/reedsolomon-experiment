@@ -30,7 +30,7 @@ instance (TL.Nat n, TL.Nat k) => ReedSolomon (RSdecoder n k a) where
 
 gen_poly :: (Num a, TL.Nat n, TL.Nat k) => RSdecoder n k a -> [a]
 gen_poly x = foldr P.mul [1] $ map e [1..m]
-  where m = block_K x
+  where m = block_N x - block_K x
         f = fgen x
         e j = [1, negate (f j)]
 
@@ -41,8 +41,9 @@ calcChecksum dec ms = mp `P.mod` gp
         gp = gen_poly dec
 
 calcSyndrome :: (TL.Nat n, TL.Nat k, Num a) => RSdecoder n k a -> [a] -> [a]
-calcSyndrome dec xs = [P.apply xs (f j) | j <- [1..(block_K dec)]]
+calcSyndrome dec xs = [P.apply xs (f j) | j <- [1..m]]
   where f = fgen dec
+        m = block_N dec - block_K dec
 
 solveErrLocations :: (TL.Nat n, TL.Nat k, Num a, Eq a) => RSdecoder n k a -> [a] -> [Int]
 solveErrLocations dec csr = [j | j <- [0..(block_N dec-1)], P.apply csr (f j) == 0]
@@ -50,8 +51,8 @@ solveErrLocations dec csr = [j | j <- [0..(block_N dec-1)], P.apply csr (f j) ==
 
 errLocator :: (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) => RSdecoder n k a -> [a] -> [a]
 errLocator dec ss = reverse cs
-  where k = block_K dec
-        (_, cs, _, _) = foldr (errLocator_sub ss) (1,[1],[1],1) [(k-1),(k-2)..0]
+  where m = block_N dec - block_K dec
+        (_, cs, _, _) = foldr (errLocator_sub ss) (1,[1],[1],1) [(m-1),(m-2)..0]
 
 errLocator_sub :: (Num k, Fractional k, Eq k) => [k] -> Int -> (Int,[k],[k],k) -> (Int,[k],[k],k)
 errLocator_sub ss n (m,cs,bs,b) | d == 0    = (m+1,cs ,bs,b)
@@ -117,7 +118,7 @@ rsDecoder :: Integer -> Integer -> TH.TypeQ
 rsDecoder n k
   | (n <= 0) || (k <= 0) = error "rsDecoder: n and k must be positive numbers."
   | (n <= k)             = error "rsDecoder: n must be greater than k."
-  | (k `mod` 2) /= 0     = error "rsDecoder: k must be an even number."
+  | ((n-k) `mod` 2) /= 0 = error "rsDecoder: n - k must be an even number."
   | otherwise            = [t| RSdecoder $(TL.natT n) $(TL.natT k) |]
 
 -- EOF
