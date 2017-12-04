@@ -11,17 +11,16 @@ import MyUtil
 
 type F929 = $(primeField 929)
 
+type Decoder = $(rsDecoder 40 18) F929
+
 alpha :: F929
 alpha = 3
 
 f_alpha :: Int -> F929
 f_alpha k = alpha ^ k
 
-gp_pdf417 :: [F929]
-gp_pdf417 = gen_poly f_alpha code_2t
-
-check_pdf417 :: (Integral a) => [a] -> [F929]
-check_pdf417 ds = calcChecksum gp_pdf417 ds
+dec_pdf417 :: Decoder
+dec_pdf417 = RSdecoder f_alpha
 
 showF929 :: [F929] -> String
 showF929 = joinStr " " . map (rjustify 3 . show)
@@ -41,19 +40,22 @@ rws = [897, 465, 237, 640, 111,  34, 672, 598,
 
 main :: IO ()
 main = do
+  let dec = dec_pdf417
+  let code_N  = block_N dec
+  let code_2t = block_K dec
   putStrLn $ "RS Code: (" ++ show code_N ++ "," ++ show (code_N - code_2t) ++ ")"
   putStrLn $ "Received message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws)
-  let csum = check_pdf417 rws
+  let csum = calcChecksum dec rws
   putStrLn $ "Checksum : " ++ showF929 csum
-  let synd = calcSyndrome f_alpha csum
+  let synd = calcSyndrome dec csum
   putStrLn $ "Syndromes: " ++ showF929 synd
-  let sigma_r = errLocator synd
+  let sigma_r = errLocator dec synd
   putStrLn $ "Error locator: " ++ showF929 sigma_r
-  let locs = solveErrLocations f_alpha sigma_r
-  let locs_r = [code_N-1-k | k <- reverse locs]
+  let locs = solveErrLocations dec sigma_r
+  let locs_r = [code_N - 1 - k | k <- reverse locs]
   putStrLn $ "Error locations: " ++ show locs_r
-  let mtx = errMatrix f_alpha locs synd
+  let mtx = errMatrix dec locs synd
   putStrLn "Error matrix:"
   mapM_ (putStrLn . ("   [ " ++) . (++ " ]") . showF929) mtx
   let evs = solveErrMatrix mtx
@@ -62,6 +64,6 @@ main = do
   let rws_corr = map (fromIntegral . F.toInteger) $ correctErrors (zip locs_r evs_r) $ map (fromInteger . fromIntegral) rws
   putStrLn $ "Corrected message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws_corr)
-  putStrLn $ "Checksum : " ++ showF929 (check_pdf417 rws_corr)
+  putStrLn $ "Checksum : " ++ showF929 (calcChecksum dec rws_corr)
 
 -- EOF
