@@ -1,56 +1,55 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DataKinds #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module ReedSolomon
   ( calcChecksum
   , calcSyndrome
-  , errLocator
-  , solveErrLocations
-  , errMatrix
-  , solveErrMatrix
+  , calcErrors
   , correctErrors
-  , RSdecoder( .. )
-  , ReedSolomon( .. )
-  , rsDecoder
+  , RScode ( .. )
+  , ReedSolomon ( .. )
+  , rsCode
   ) where
 
 import qualified Polynomial as P
 import qualified Language.Haskell.TH as TH
 import qualified TypeLevel.Number.Nat as TL
 
-data RSdecoder n k a = RSdecoder { fgen :: Int -> a }
+data RScode n k a = RScode { fgen :: Int -> a }
 
-class ReedSolomon a where
-  block_N :: a -> Int
-  block_K :: a -> Int
+class ReedSolomon c a where
+  block_N :: c a -> Int
+  block_K :: c a -> Int
+  generator :: c a -> (Int -> a)
 
-instance (TL.Nat n, TL.Nat k) => ReedSolomon (RSdecoder n k a) where
+instance (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) =>
+         ReedSolomon (RScode n k) a where
   block_N _ = TL.toInt (undefined :: n)
   block_K _ = TL.toInt (undefined :: k)
+  generator c = fgen c
 
-gen_poly :: (Num a, TL.Nat n, TL.Nat k) => RSdecoder n k a -> [a]
-gen_poly x = foldr P.mul [1] $ map e [1..m]
-  where m = block_N x - block_K x
-        f = fgen x
+gen_poly :: (Num a, ReedSolomon c a) => c a -> [a]
+gen_poly dec = foldr P.mul [1] $ map e [1..m]
+  where m = block_N dec - block_K dec
+        f = generator dec
         e j = [1, negate (f j)]
 
-calcChecksum :: (Integral b, TL.Nat n, TL.Nat k, Num a, Fractional a) =>
-                RSdecoder n k a -> [b] -> [a]
-calcChecksum dec ms = mp `P.mod` gp
-  where mp = map (fromInteger . fromIntegral) ms
-        gp = gen_poly dec
+calcChecksum :: (Num a, Fractional a, ReedSolomon c a) => c a -> [a] -> [a]
+calcChecksum dec mp = mp `P.mod` gp
+  where gp = gen_poly dec
 
-calcSyndrome :: (TL.Nat n, TL.Nat k, Num a) => RSdecoder n k a -> [a] -> [a]
+calcSyndrome :: (Num a, ReedSolomon c a) => c a -> [a] -> [a]
 calcSyndrome dec xs = [P.apply xs (f j) | j <- [1..m]]
-  where f = fgen dec
+  where f = generator dec
         m = block_N dec - block_K dec
 
-solveErrLocations :: (TL.Nat n, TL.Nat k, Num a, Eq a) => RSdecoder n k a -> [a] -> [Int]
+solveErrLocations :: (Num a, Eq a, ReedSolomon c a) => c a -> [a] -> [Int]
 solveErrLocations dec csr = [j | j <- [0..(block_N dec-1)], P.apply csr (f j) == 0]
-  where f = fgen dec
+  where f = generator dec
 
-errLocator :: (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) => RSdecoder n k a -> [a] -> [a]
-errLocator dec ss = reverse cs
+calcErrLocator :: (Num a, Fractional a, Eq a, ReedSolomon c a) => c a -> [a] -> [a]
+calcErrLocator dec ss = reverse cs
   where m = block_N dec - block_K dec
         (_, cs, _, _) = foldr (errLocator_sub ss) (1,[1],[1],1) [(m-1),(m-2)..0]
 
@@ -63,9 +62,10 @@ errLocator_sub ss n (m,cs,bs,b) | d == 0    = (m+1,cs ,bs,b)
         bs' = map (e*) bs `P.mul` (1 : replicate m 0)
         cs' = cs `P.sub` bs'
 
-errMatrix :: (TL.Nat n, TL.Nat k, Num a) => RSdecoder n k a -> [Int] -> [a] -> [[a]]
-errMatrix dec locs ss = [map (fgen dec . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
-  where t = length locs
+calcErrMatrix :: (ReedSolomon c a) => c a -> [Int] -> [a] -> [[a]]
+calcErrMatrix dec locs ss = [map (f . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
+  where f = generator dec
+        t = length locs
 
 solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k]
 solveErrMatrix mtx = map (head . drop n) $ backwardSubst n $ forwardErase n mtx
@@ -107,6 +107,14 @@ substCol j mtx = foldr ers mtx [0..(j-1)]
 backwardSubst :: (Num a, Fractional a, Eq a) => Int -> [[a]] -> [[a]]
 backwardSubst n mtx = foldr substCol mtx [1..(n-1)]
 
+calcErrors :: (Num a, Fractional a, Eq a, ReedSolomon c a) => c a -> [a] -> [(Int,a)]
+calcErrors dec synd = zip locs_r evs_r
+  where sig_r  = calcErrLocator dec synd
+        locs   = solveErrLocations dec sig_r
+        locs_r = [block_N dec - 1 - k | k <- reverse locs]
+        mtx    = calcErrMatrix dec locs synd
+        evs_r  = reverse $ solveErrMatrix mtx
+
 correctErrors :: (Num a) => [(Int,a)] -> [a] -> [a]
 correctErrors ers xs = iter 0 ers xs
   where iter _ _  [] = []
@@ -114,11 +122,11 @@ correctErrors ers xs = iter 0 ers xs
         iter j ((k,e):es) (y:ys) | j == k    = (y - e) : iter (j+1) es ys
                                  | otherwise = y : iter (j+1) ((k,e):es) ys
 
-rsDecoder :: Integer -> Integer -> TH.TypeQ
-rsDecoder n k
-  | (n <= 0) || (k <= 0) = error "rsDecoder: n and k must be positive numbers."
-  | (n <= k)             = error "rsDecoder: n must be greater than k."
-  | ((n-k) `mod` 2) /= 0 = error "rsDecoder: n - k must be an even number."
-  | otherwise            = [t| RSdecoder $(TL.natT n) $(TL.natT k) |]
+rsCode :: Integer -> Integer -> TH.TypeQ
+rsCode n k
+  | (n <= 0) || (k <= 0) = error "rsCode: n and k must be positive numbers."
+  | (n <= k)             = error "rsCode: n must be greater than k."
+  | ((n-k) `mod` 2) /= 0 = error "rsCode: n - k must be an even number."
+  | otherwise            = [t| RScode $(TL.natT n) $(TL.natT k) |]
 
 -- EOF

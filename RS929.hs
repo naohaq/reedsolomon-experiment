@@ -1,4 +1,4 @@
-{-# LANGUAGE DataKinds, TemplateHaskell #-}
+{-# LANGUAGE TemplateHaskell, DataKinds, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module Main where
@@ -11,16 +11,14 @@ import MyUtil
 
 type F929 = $(primeField 929)
 
-type Decoder = $(rsDecoder 40 22) F929
-
 alpha :: F929
 alpha = 3
 
 f_alpha :: Int -> F929
 f_alpha k = alpha ^ k
 
-dec_pdf417 :: Decoder
-dec_pdf417 = RSdecoder f_alpha
+dec_pdf417 :: $(rsCode 40 22) F929
+dec_pdf417 = RScode f_alpha
 
 showF929 :: [F929] -> String
 showF929 = joinStr " " . map (rjustify 3 . show)
@@ -30,6 +28,19 @@ dumpMsg [] = []
 dumpMsg xs = (joinStr " " . map (rjustify 3 . show)) hs : dumpMsg ts
   where hs = take 8 xs
         ts = drop 8 xs
+
+toF929 :: (Integral a) => a -> F929
+toF929 = fromInteger . fromIntegral
+
+fromF929 :: (Integral a) => F929 -> a
+fromF929 = fromIntegral . F.toInteger
+
+decode :: (ReedSolomon c F929) => c F929 -> [Int] -> ([Int], [(Int,F929)])
+decode dec msg = (map fromF929 $ correctErrors errs mp, errs)
+  where mp   = map toF929 msg
+        par  = calcChecksum dec mp
+        synd = calcSyndrome dec par
+        errs = calcErrors dec synd
 
 rws :: [Int]
 rws = [897, 465, 237, 640, 111,  34, 672, 598,
@@ -44,24 +55,10 @@ main = do
   putStrLn $ "RS Code: (" ++ show (block_N dec) ++ "," ++ show (block_K dec) ++ ")"
   putStrLn $ "Received message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws)
-  let csum = calcChecksum dec rws
-  putStrLn $ "Checksum : " ++ showF929 csum
-  let synd = calcSyndrome dec csum
-  putStrLn $ "Syndromes: " ++ showF929 synd
-  let sigma_r = errLocator dec synd
-  putStrLn $ "Error locator: " ++ showF929 sigma_r
-  let locs = solveErrLocations dec sigma_r
-  let locs_r = [block_N dec - 1 - k | k <- reverse locs]
-  putStrLn $ "Error locations: " ++ show locs_r
-  let mtx = errMatrix dec locs synd
-  putStrLn "Error matrix:"
-  mapM_ (putStrLn . ("   [ " ++) . (++ " ]") . showF929) mtx
-  let evs = solveErrMatrix mtx
-  let evs_r = reverse evs
-  putStrLn $ "Error values: " ++ showF929 evs_r
-  let rws_corr = map (fromIntegral . F.toInteger) $ correctErrors (zip locs_r evs_r) $ map (fromInteger . fromIntegral) rws
+  let (rws_corr, errs) = decode dec rws
   putStrLn $ "Corrected message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws_corr)
-  putStrLn $ "Checksum : " ++ showF929 (calcChecksum dec rws_corr)
+  putStrLn $ "Errors: " ++ show errs
+  putStrLn $ "Checksum : " ++ showF929 (calcChecksum dec $ map toF929 rws_corr)
 
 -- EOF
