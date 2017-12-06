@@ -12,10 +12,10 @@ import MyUtil
 
 type F256 = GF256 PP301
 
-type Decoder = $(rsDecoder 40 22) F256
+type Decoder = $(rsCode 40 22) F256
 
 dec_ecc200 :: Decoder
-dec_ecc200 = RSdecoder pow2
+dec_ecc200 = RScode pow2
 
 showHex :: [F256] -> String
 showHex = joinStr " " . map (fromW8toHex . toWord8)
@@ -40,16 +40,16 @@ main = do
   putStrLn $ "RS Code: (" ++ show (block_N dec) ++ "," ++ show (block_K dec) ++ ")"
   putStrLn $ "Received message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws)
-  let csum = calcChecksum dec rws
+  let csum = calcChecksum dec $ map fromWord8 rws
   putStrLn $ "Checksum : " ++ showHex csum
   let synd = calcSyndrome dec csum
   putStrLn $ "Syndromes: " ++ showHex synd
-  let sigma_r = errLocator dec synd
+  let sigma_r = calcErrLocator dec synd
   putStrLn $ "Error locator: " ++ showHex sigma_r
   let locs = solveErrLocations dec sigma_r
   let locs_r = [block_N dec - 1 - k | k <- reverse locs]
   putStrLn $ "Error locations: " ++ show locs_r
-  let mtx = errMatrix dec locs synd
+  let mtx = calcErrMatrix dec locs synd
   putStrLn "Error matrix:"
   mapM_ (putStrLn . ("   [ " ++) . (++ " ]") . showHex) mtx
   let evs = solveErrMatrix mtx
@@ -59,6 +59,6 @@ main = do
   let rws_corr = map toWord8 $ correctErrors errs $ map fromWord8 rws
   putStrLn $ "Corrected message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws_corr)
-  putStrLn $ "Checksum : " ++ showHex (calcChecksum dec rws_corr)
+  putStrLn $ "Checksum : " ++ showHex (calcChecksum dec $ map fromWord8 rws_corr)
 
 -- EOF

@@ -2,55 +2,60 @@
 {-# OPTIONS_GHC -Wall #-}
 
 module ReedSolomon
-  ( calcChecksum
+  ( encode
+  , calcChecksum
   , calcSyndrome
-  , errLocator
+  , calcErrLocator
   , solveErrLocations
-  , errMatrix
+  , calcErrMatrix
   , solveErrMatrix
   , correctErrors
-  , RSdecoder( .. )
+  , RScode( .. )
   , ReedSolomon( .. )
-  , rsDecoder
+  , rsCode
   ) where
 
 import qualified Polynomial as P
 import qualified Language.Haskell.TH as TH
 import qualified TypeLevel.Number.Nat as TL
 
-data RSdecoder n k a = RSdecoder { fgen :: Int -> a }
+data RScode n k a = RScode { fgen :: Int -> a }
 
 class ReedSolomon a where
   block_N :: a -> Int
   block_K :: a -> Int
 
-instance (TL.Nat n, TL.Nat k) => ReedSolomon (RSdecoder n k a) where
+instance (TL.Nat n, TL.Nat k) => ReedSolomon (RScode n k a) where
   block_N _ = TL.toInt (undefined :: n)
   block_K _ = TL.toInt (undefined :: k)
 
-gen_poly :: (Num a, TL.Nat n, TL.Nat k) => RSdecoder n k a -> [a]
-gen_poly x = foldr P.mul [1] $ map e [1..m]
-  where m = block_N x - block_K x
-        f = fgen x
+gen_poly :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [a]
+gen_poly rsc = foldr P.mul [1] $ map e [1..m]
+  where m = block_N rsc - block_K rsc
+        f = fgen rsc
         e j = [1, negate (f j)]
 
-calcChecksum :: (Integral b, TL.Nat n, TL.Nat k, Num a, Fractional a) =>
-                RSdecoder n k a -> [b] -> [a]
-calcChecksum dec ms = mp `P.mod` gp
-  where mp = map (fromInteger . fromIntegral) ms
-        gp = gen_poly dec
+encode :: (TL.Nat n, TL.Nat k, Num a, Fractional a) => RScode n k a -> [a] -> [a]
+encode rsc mp = mp' ++ cs
+  where mp' = take (block_K rsc) mp
+        gp = gen_poly rsc
+        cs = (mp' ++ replicate (block_N rsc - block_K rsc) 0) `P.mod` gp
 
-calcSyndrome :: (TL.Nat n, TL.Nat k, Num a) => RSdecoder n k a -> [a] -> [a]
+calcChecksum :: (TL.Nat n, TL.Nat k, Num a, Fractional a) => RScode n k a -> [a] -> [a]
+calcChecksum dec mp = mp `P.mod` gp
+  where gp = gen_poly dec
+
+calcSyndrome :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [a] -> [a]
 calcSyndrome dec xs = [P.apply xs (f j) | j <- [1..m]]
   where f = fgen dec
         m = block_N dec - block_K dec
 
-solveErrLocations :: (TL.Nat n, TL.Nat k, Num a, Eq a) => RSdecoder n k a -> [a] -> [Int]
+solveErrLocations :: (TL.Nat n, TL.Nat k, Num a, Eq a) => RScode n k a -> [a] -> [Int]
 solveErrLocations dec csr = [j | j <- [0..(block_N dec-1)], P.apply csr (f j) == 0]
   where f = fgen dec
 
-errLocator :: (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) => RSdecoder n k a -> [a] -> [a]
-errLocator dec ss = reverse cs
+calcErrLocator :: (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) => RScode n k a -> [a] -> [a]
+calcErrLocator dec ss = reverse cs
   where m = block_N dec - block_K dec
         (_, cs, _, _) = foldr (errLocator_sub ss) (1,[1],[1],1) [(m-1),(m-2)..0]
 
@@ -63,8 +68,8 @@ errLocator_sub ss n (m,cs,bs,b) | d == 0    = (m+1,cs ,bs,b)
         bs' = map (e*) bs `P.mul` (1 : replicate m 0)
         cs' = cs `P.sub` bs'
 
-errMatrix :: (TL.Nat n, TL.Nat k, Num a) => RSdecoder n k a -> [Int] -> [a] -> [[a]]
-errMatrix dec locs ss = [map (fgen dec . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
+calcErrMatrix :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [Int] -> [a] -> [[a]]
+calcErrMatrix dec locs ss = [map (fgen dec . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
   where t = length locs
 
 solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k]
@@ -114,11 +119,11 @@ correctErrors ers xs = iter 0 ers xs
         iter j ((k,e):es) (y:ys) | j == k    = (y - e) : iter (j+1) es ys
                                  | otherwise = y : iter (j+1) ((k,e):es) ys
 
-rsDecoder :: Integer -> Integer -> TH.TypeQ
-rsDecoder n k
-  | (n <= 0) || (k <= 0) = error "rsDecoder: n and k must be positive numbers."
-  | (n <= k)             = error "rsDecoder: n must be greater than k."
-  | ((n-k) `mod` 2) /= 0 = error "rsDecoder: n - k must be an even number."
-  | otherwise            = [t| RSdecoder $(TL.natT n) $(TL.natT k) |]
+rsCode :: Integer -> Integer -> TH.TypeQ
+rsCode n k
+  | (n <= 0) || (k <= 0) = error "rsCode: n and k must be positive numbers."
+  | (n <= k)             = error "rsCode: n must be greater than k."
+  | ((n-k) `mod` 2) /= 0 = error "rsCode: n - k must be an even number."
+  | otherwise            = [t| RScode $(TL.natT n) $(TL.natT k) |]
 
 -- EOF
