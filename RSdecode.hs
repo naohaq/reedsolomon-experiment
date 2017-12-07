@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, DataKinds #-}
+{-# LANGUAGE TemplateHaskell, DataKinds, FlexibleContexts #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module Main where
@@ -12,9 +12,7 @@ import MyUtil
 
 type F256 = GF256 PP301
 
-type Decoder = $(rsCode 40 22) F256
-
-dec_ecc200 :: Decoder
+dec_ecc200 :: $(rsCode 40 22) F256
 dec_ecc200 = RScode pow2
 
 showHex :: [F256] -> String
@@ -25,6 +23,14 @@ dumpMsg [] = []
 dumpMsg xs = (joinStr " " . map fromW8toHex) hs : dumpMsg ts
   where hs = take 8 xs
         ts = drop 8 xs
+
+decode :: (ReedSolomon c F256) => c F256 -> [W.Word8] -> ([W.Word8], [(Int,W.Word8)])
+decode dec msg = (map toWord8 $ correctErrors errs mp, errs')
+  where mp   = map fromWord8 msg
+        par  = calcChecksum dec mp
+        synd = calcSyndrome dec par
+        errs = calcErrors dec synd
+        errs' = [(i, toWord8 v) | (i,v) <- errs]
 
 -- Received message with burst error.
 rws :: [W.Word8]
@@ -40,25 +46,10 @@ main = do
   putStrLn $ "RS Code: (" ++ show (block_N dec) ++ "," ++ show (block_K dec) ++ ")"
   putStrLn $ "Received message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws)
-  let csum = calcChecksum dec $ map fromWord8 rws
-  putStrLn $ "Checksum : " ++ showHex csum
-  let synd = calcSyndrome dec csum
-  putStrLn $ "Syndromes: " ++ showHex synd
-  let sigma_r = calcErrLocator dec synd
-  putStrLn $ "Error locator: " ++ showHex sigma_r
-  let locs = solveErrLocations dec sigma_r
-  let locs_r = [block_N dec - 1 - k | k <- reverse locs]
-  putStrLn $ "Error locations: " ++ show locs_r
-  let mtx = calcErrMatrix dec locs synd
-  putStrLn "Error matrix:"
-  mapM_ (putStrLn . ("   [ " ++) . (++ " ]") . showHex) mtx
-  let evs = solveErrMatrix mtx
-  let evs_r = reverse evs
-  putStrLn $ "Error values: " ++ showHex evs_r
-  let errs = zip locs_r evs_r
-  let rws_corr = map toWord8 $ correctErrors errs $ map fromWord8 rws
+  let (rws_corr, errs) = decode dec rws
   putStrLn $ "Corrected message: "
   mapM_ (putStrLn . ("   " ++)) (dumpMsg rws_corr)
-  putStrLn $ "Checksum : " ++ showHex (calcChecksum dec $ map fromWord8 rws_corr)
+  putStrLn $ "Errors: " ++ joinStr ", " [show i ++ ": " ++ fromW8toHex v | (i,v) <- errs]
+  putStrLn $ "Checksum : " ++ showHex (calcChecksum dec (map fromWord8 rws_corr))
 
 -- EOF

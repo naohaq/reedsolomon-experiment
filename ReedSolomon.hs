@@ -1,17 +1,14 @@
 {-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DataKinds #-}
+{-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module ReedSolomon
-  ( encode
-  , calcChecksum
+  ( calcChecksum
   , calcSyndrome
-  , calcErrLocator
-  , solveErrLocations
-  , calcErrMatrix
-  , solveErrMatrix
+  , calcErrors
   , correctErrors
-  , RScode( .. )
-  , ReedSolomon( .. )
+  , RScode ( .. )
+  , ReedSolomon ( .. )
   , rsCode
   ) where
 
@@ -21,40 +18,37 @@ import qualified TypeLevel.Number.Nat as TL
 
 data RScode n k a = RScode { fgen :: Int -> a }
 
-class ReedSolomon a where
-  block_N :: a -> Int
-  block_K :: a -> Int
+class ReedSolomon c a where
+  block_N :: c a -> Int
+  block_K :: c a -> Int
+  generator :: c a -> (Int -> a)
 
-instance (TL.Nat n, TL.Nat k) => ReedSolomon (RScode n k a) where
+instance (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) =>
+         ReedSolomon (RScode n k) a where
   block_N _ = TL.toInt (undefined :: n)
   block_K _ = TL.toInt (undefined :: k)
+  generator c = fgen c
 
-gen_poly :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [a]
-gen_poly rsc = foldr P.mul [1] $ map e [1..m]
-  where m = block_N rsc - block_K rsc
-        f = fgen rsc
+gen_poly :: (Num a, ReedSolomon c a) => c a -> [a]
+gen_poly dec = foldr P.mul [1] $ map e [1..m]
+  where m = block_N dec - block_K dec
+        f = generator dec
         e j = [1, negate (f j)]
 
-encode :: (TL.Nat n, TL.Nat k, Num a, Fractional a) => RScode n k a -> [a] -> [a]
-encode rsc mp = mp' ++ cs
-  where mp' = take (block_K rsc) mp
-        gp = gen_poly rsc
-        cs = (mp' ++ replicate (block_N rsc - block_K rsc) 0) `P.mod` gp
-
-calcChecksum :: (TL.Nat n, TL.Nat k, Num a, Fractional a) => RScode n k a -> [a] -> [a]
+calcChecksum :: (Num a, Fractional a, ReedSolomon c a) => c a -> [a] -> [a]
 calcChecksum dec mp = mp `P.mod` gp
   where gp = gen_poly dec
 
-calcSyndrome :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [a] -> [a]
+calcSyndrome :: (Num a, ReedSolomon c a) => c a -> [a] -> [a]
 calcSyndrome dec xs = [P.apply xs (f j) | j <- [1..m]]
-  where f = fgen dec
+  where f = generator dec
         m = block_N dec - block_K dec
 
-solveErrLocations :: (TL.Nat n, TL.Nat k, Num a, Eq a) => RScode n k a -> [a] -> [Int]
+solveErrLocations :: (Num a, Eq a, ReedSolomon c a) => c a -> [a] -> [Int]
 solveErrLocations dec csr = [j | j <- [0..(block_N dec-1)], P.apply csr (f j) == 0]
-  where f = fgen dec
+  where f = generator dec
 
-calcErrLocator :: (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) => RScode n k a -> [a] -> [a]
+calcErrLocator :: (Num a, Fractional a, Eq a, ReedSolomon c a) => c a -> [a] -> [a]
 calcErrLocator dec ss = reverse cs
   where m = block_N dec - block_K dec
         (_, cs, _, _) = foldr (errLocator_sub ss) (1,[1],[1],1) [(m-1),(m-2)..0]
@@ -68,9 +62,10 @@ errLocator_sub ss n (m,cs,bs,b) | d == 0    = (m+1,cs ,bs,b)
         bs' = map (e*) bs `P.mul` (1 : replicate m 0)
         cs' = cs `P.sub` bs'
 
-calcErrMatrix :: (TL.Nat n, TL.Nat k, Num a) => RScode n k a -> [Int] -> [a] -> [[a]]
-calcErrMatrix dec locs ss = [map (fgen dec . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
-  where t = length locs
+calcErrMatrix :: (ReedSolomon c a) => c a -> [Int] -> [a] -> [[a]]
+calcErrMatrix dec locs ss = [map (f . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
+  where f = generator dec
+        t = length locs
 
 solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k]
 solveErrMatrix mtx = map (head . drop n) $ backwardSubst n $ forwardErase n mtx
@@ -111,6 +106,14 @@ substCol j mtx = foldr ers mtx [0..(j-1)]
 
 backwardSubst :: (Num a, Fractional a, Eq a) => Int -> [[a]] -> [[a]]
 backwardSubst n mtx = foldr substCol mtx [1..(n-1)]
+
+calcErrors :: (Num a, Fractional a, Eq a, ReedSolomon c a) => c a -> [a] -> [(Int,a)]
+calcErrors dec synd = zip locs_r evs_r
+  where sig_r  = calcErrLocator dec synd
+        locs   = solveErrLocations dec sig_r
+        locs_r = [block_N dec - 1 - k | k <- reverse locs]
+        mtx    = calcErrMatrix dec locs synd
+        evs_r  = reverse $ solveErrMatrix mtx
 
 correctErrors :: (Num a) => [(Int,a)] -> [a] -> [a]
 correctErrors ers xs = iter 0 ers xs
