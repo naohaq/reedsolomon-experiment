@@ -72,23 +72,22 @@ errLocator_sub ss n (m,cs,bs,b) | d == 0    = (m+1,cs ,bs,b)
         bs' = map (e*) bs `P.mul` (1 : replicate m 0)
         cs' = cs `P.sub` bs'
 
-calcErrMatrix :: (ReedSolomon c a) => c a -> [Int] -> [a] -> [[a]]
-calcErrMatrix dec locs ss = [map (f . (j*)) locs ++ [ss !! (j-1)] | j <- [1..t]]
+calcErrMatrix :: (ReedSolomon c a) => c a -> [Int] -> [[a]]
+calcErrMatrix dec locs = [map (f . (j*)) locs | j <- [1..t]]
   where f = generator dec
         t = length locs
 
-solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k]
-solveErrMatrix mtx = map (head . drop n) $ LA.backwardSubst n $ LA.forwardErase n mtx
+solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k] -> [k]
+solveErrMatrix mtx ss = LA.solve n mtx (take n ss)
   where n = length mtx
-
 
 calcErrors :: (Num a, Fractional a, Eq a, ReedSolomon c a) => c a -> [a] -> [(Int,a)]
 calcErrors dec synd = zip locs_r evs_r
   where sig_r  = calcErrLocator dec synd
         locs   = solveErrLocations dec sig_r
         locs_r = [block_N dec - 1 - k | k <- reverse locs]
-        mtx    = calcErrMatrix dec locs synd
-        evs_r  = reverse $ solveErrMatrix mtx
+        mtx    = calcErrMatrix dec locs
+        evs_r  = reverse $ solveErrMatrix mtx synd
 
 correctErrors :: (Num a) => [(Int,a)] -> [a] -> [a]
 correctErrors ers xs = iter 0 ers xs
