@@ -29,12 +29,6 @@ dumpMsg xs = (joinStr " " . map (rjustify 3 . show)) hs : dumpMsg ts
   where hs = take 8 xs
         ts = drop 8 xs
 
-toF929 :: (Integral a) => a -> F929
-toF929 = fromInteger . fromIntegral
-
-fromF929 :: (Integral a) => F929 -> a
-fromF929 = fromIntegral . F.toInteger
-
 decode :: (ReedSolomon c F929) => c F929 -> [Int] -> ([Int], [(Int,F929)])
 decode dec msg = (map fromF929 $ correctErrors errs mp, errs)
   where mp   = map toF929 msg
