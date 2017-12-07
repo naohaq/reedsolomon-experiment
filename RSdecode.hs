@@ -12,6 +12,9 @@ import MyUtil
 
 type F256 = GF256 PP301
 
+dec_weak :: $(rsCode 30 22) F256
+dec_weak = RScode pow2
+
 dec_ecc200 :: $(rsCode 40 22) F256
 dec_ecc200 = RScode pow2
 

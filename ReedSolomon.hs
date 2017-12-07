@@ -7,6 +7,7 @@ module ReedSolomon
   , calcSyndrome
   , calcErrors
   , correctErrors
+  , encodeBlock
   , RScode ( .. )
   , ReedSolomon ( .. )
   , rsCode
@@ -30,10 +31,18 @@ instance (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) =>
   generator c = fgen c
 
 gen_poly :: (Num a, ReedSolomon c a) => c a -> [a]
-gen_poly dec = foldr P.mul [1] $ map e [1..m]
-  where m = block_N dec - block_K dec
-        f = generator dec
+gen_poly rsc = foldr P.mul [1] $ map e [1..m]
+  where m = block_N rsc - block_K rsc
+        f = generator rsc
         e j = [1, negate (f j)]
+
+encodeBlock :: (Num a, Fractional a, ReedSolomon c a) => c a -> [a] -> [a]
+encodeBlock rsc mp = mp' ++ (map negate res)
+  where k   = block_K rsc
+        m   = block_N rsc - k
+        gp  = gen_poly rsc
+        mp' = take k mp
+        res = (mp' ++ replicate m 0) `P.mod` gp
 
 calcChecksum :: (Num a, Fractional a, ReedSolomon c a) => c a -> [a] -> [a]
 calcChecksum dec mp = mp `P.mod` gp
