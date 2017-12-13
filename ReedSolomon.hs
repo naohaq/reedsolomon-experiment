@@ -77,7 +77,7 @@ calcErrMatrix dec locs = [map (f . (j*)) locs | j <- [1..t]]
   where f = generator dec
         t = length locs
 
-solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k] -> [k]
+solveErrMatrix :: (Num k, Fractional k, Eq k) => [[k]] -> [k] -> Maybe [k]
 solveErrMatrix mtx ss = LA.solve n mtx (take n ss)
   where n = length mtx
 
@@ -87,7 +87,8 @@ calcErrors dec synd = zip locs_r evs_r
         locs   = solveErrLocations dec sig_r
         locs_r = [block_N dec - 1 - k | k <- reverse locs]
         mtx    = calcErrMatrix dec locs
-        evs_r  = reverse $ solveErrMatrix mtx synd
+        evs_m  = solveErrMatrix mtx synd
+        evs_r  = maybe [] reverse evs_m
 
 correctErrors :: (Num a) => [(Int,a)] -> [a] -> [a]
 correctErrors ers xs = iter 0 ers xs

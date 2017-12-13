@@ -12,6 +12,7 @@ module Polynomial
   ) where
 
 import Prelude hiding (divMod, mod)
+import Data.List ( foldl' )
 
 normalize :: (Eq a, Num a) => [a] -> [a]
 normalize [] = []
@@ -66,6 +67,7 @@ mod :: (Num a, Fractional a) => [a] -> [a] -> [a]
 mod z w = snd $ divMod z w
 
 apply :: (Num a) => [a] -> a -> a
-apply xs y = sum $ zipWith (*) (reverse xs) $ iterate (y*) 1
+apply xs y = foldl' f 0 xs
+  where f b c = b * y + c
 
 -- EOF
