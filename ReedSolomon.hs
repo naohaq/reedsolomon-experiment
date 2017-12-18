@@ -1,5 +1,6 @@
-{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, DataKinds #-}
+{-# LANGUAGE ScopedTypeVariables, TemplateHaskell, KindSignatures, DataKinds, ConstraintKinds #-}
 {-# LANGUAGE MultiParamTypeClasses, FlexibleInstances #-}
+{-# LANGUAGE CPP #-}
 {-# OPTIONS_GHC -Wall #-}
 
 module ReedSolomon
@@ -16,19 +17,37 @@ module ReedSolomon
 import qualified Polynomial as P
 import qualified LinearAlgebra as LA
 import qualified Language.Haskell.TH as TH
+#if !defined(UseGHCTypeLits)
 import qualified TypeLevel.Number.Nat as TL
+#else
+import Data.Proxy ( Proxy(..) )
+import GHC.TypeLits
+#endif
 
+#if !defined(UseGHCTypeLits)
 data RScode n k a = RScode { fgen :: Int -> a }
+#else
+data RScode (n::Nat) (k::Nat) a = RScode { fgen :: Int -> a }
+#endif
+
+#if !defined(UseGHCTypeLits)
+type KnownNat p = TL.Nat p
+#endif
 
 class ReedSolomon c a where
   block_N :: c a -> Int
   block_K :: c a -> Int
   generator :: c a -> (Int -> a)
 
-instance (TL.Nat n, TL.Nat k, Num a, Fractional a, Eq a) =>
+instance (KnownNat n, KnownNat k, Num a, Fractional a, Eq a) =>
          ReedSolomon (RScode n k) a where
+#if !defined(UseGHCTypeLits)
   block_N _ = TL.toInt (undefined :: n)
   block_K _ = TL.toInt (undefined :: k)
+#else
+  block_N _ = fromIntegral $ natVal (Proxy :: Proxy n)
+  block_K _ = fromIntegral $ natVal (Proxy :: Proxy k)
+#endif
   generator c = fgen c
 
 gen_poly :: (Num a, ReedSolomon c a) => c a -> [a]
@@ -102,6 +121,10 @@ rsCode n k
   | (n <= 0) || (k <= 0) = error "rsCode: n and k must be positive numbers."
   | (n <= k)             = error "rsCode: n must be greater than k."
   | ((n-k) `mod` 2) /= 0 = error "rsCode: n - k must be an even number."
+#if !defined(UseGHCTypeLits)
   | otherwise            = [t| RScode $(TL.natT n) $(TL.natT k) |]
+#else
+  | otherwise            = [t| RScode $(TH.litT (TH.numTyLit n)) $(TH.litT (TH.numTyLit k)) |]
+#endif
 
 -- EOF

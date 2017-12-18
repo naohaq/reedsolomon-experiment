@@ -3,7 +3,7 @@
 
 module Main where
 
-import Data.GF2Extension
+import Data.GF2Extension ( pow2 )
 import Data.GF256
 import qualified Data.Word as W
 
